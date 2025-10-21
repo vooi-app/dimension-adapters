@@ -1,139 +1,201 @@
 import fetchURL from "../../utils/fetchURL";
 import { FetchResult, SimpleAdapter, FetchOptions } from "../../adapters/types";
 import { CHAIN } from "../../helpers/chains";
+import asyncRetry from "async-retry";
 
-const URL = "https://vooi-rebates.fly.dev/";
-const endpoint = "defillama/volumes";
 const startTimestampArbitrum = 1714608000; // 02.05.2024
 const startTimestampBsc = 1717200000; // 01.06.2024
 const startTimestampBase = 1722470400; // 01.08.2024
 const startTimestampHyperliquid = 1730678400; // 04.11.2024
 
-const fetchArbitrum = async (timestamp: number, _t: any, options: FetchOptions): Promise<FetchResult> => {
-    // const timestamp = options.toTimestamp
-    const fetchData = await fetchURL(`${URL}${endpoint}?ts=${options.startOfDay}`) // returns data for the day before
-    let synfuturesItem = fetchData.filter(((item) => item.protocol == "synfutures"))
-    if (!synfuturesItem) {
-        synfuturesItem = [{dailyVolume: 0, totalVolume: 0}]
-    }
-    let ostiumItem = fetchData.find(((item) => item.protocol == "ostium"))
-    if (!ostiumItem) {
-        ostiumItem = {dailyVolume: 0, totalVolume: 0}
-    }
+interface StatisticsItemRaw {
+  dailyVolume: string;
+  network: string | null;
+  protocol: string;
+  totalVolume: string;
+}
 
-    let gmxItem = fetchData.find(((item) => item.protocol == "gmx" && item.network == "arbitrum"))
-    if (!gmxItem) {
-        gmxItem = {dailyVolume: 0, totalVolume: 0}
-    }
+interface StatisticsItem {
+  dailyVolume: number;
+  network?: string | null;
+  protocol?: string;
+  totalVolume: number;
+}
 
-    let dailyVolume =
-        + Number(ostiumItem.dailyVolume)
-        + Number(gmxItem.dailyVolume)
-    let totalVolume =
-        + Number(ostiumItem.totalVolume)
-        + Number(gmxItem.totalVolume)
-
-    for (let i in synfuturesItem){
-        dailyVolume = Number(dailyVolume) + Number(synfuturesItem[i].dailyVolume)
-        totalVolume = Number(totalVolume) + Number(synfuturesItem[i].totalVolume)
+async function fetchStatistics(startOfDay: number): Promise<StatisticsItem[]> {
+  const data = (await asyncRetry(
+    async () =>
+      fetchURL(
+        `https://vooi-rebates.fly.dev/defillama/volumes?ts=${startOfDay}`
+      ),
+    {
+      retries: 3,
+      minTimeout: 1000,
+      maxTimeout: 5000,
+      factor: 2,
     }
-    return {
-        dailyVolume,
-        totalVolume,
-        timestamp
-    };
+  )) as StatisticsItemRaw[];
+
+  return data.map((item) => ({
+    ...item,
+    dailyVolume: Number(item.dailyVolume),
+    totalVolume: Number(item.totalVolume),
+  }));
+}
+
+const fetchArbitrum = async (
+  timestamp: number,
+  _t: any,
+  options: FetchOptions
+): Promise<FetchResult> => {
+  const data = await fetchStatistics(options.startOfDay);
+  const { dailyVolume, totalVolume } = data.reduce(
+    (acc, item) => {
+      if (item.protocol == "ostium") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      if (item.protocol == "gmx" && item.network == "arbitrum") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      if (item.protocol == "gains" && item.network == "arbitrum") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      if (item.protocol == "synfutures") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      return acc;
+    },
+    { dailyVolume: 0, totalVolume: 0 }
+  );
+  return {
+    dailyVolume,
+    totalVolume,
+    timestamp,
+  };
 };
 
-const fetchOptimism = async (timestamp: number, _t: any, options: FetchOptions): Promise<FetchResult> => {
-    const fetchData = await fetchURL(`${URL}${endpoint}?ts=${options.startOfDay}`) // returns data for the day before
+const fetchOptimism = async (
+  timestamp: number,
+  _t: any,
+  options: FetchOptions
+): Promise<FetchResult> => {
+  const data = await fetchStatistics(options.startOfDay);
+  const { dailyVolume, totalVolume } = data.reduce(
+    (acc, item) => {
+      if (item.protocol == "orderly") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      return acc;
+    },
+    { dailyVolume: 0, totalVolume: 0 }
+  );
 
-    let orderlyItem = fetchData.find(((item) => item.protocol == "orderly"))
-    if (!orderlyItem) {
-        orderlyItem = {dailyVolume: 0, totalVolume: 0}
-    }
-    let dailyVolume = Number(orderlyItem.dailyVolume)
-    let totalVolume = Number(orderlyItem.totalVolume)
-    return {
-        dailyVolume: dailyVolume,
-        totalVolume: totalVolume,
-        timestamp
-    };
+  return {
+    dailyVolume: dailyVolume,
+    totalVolume: totalVolume,
+    timestamp,
+  };
 };
 
-const fetchHyperliquid = async (timestamp: number, _t: any, options: FetchOptions): Promise<FetchResult> => {
-    const fetchData = await fetchURL(`${URL}${endpoint}?ts=${options.startOfDay}`) // returns data for the day before
+const fetchHyperliquid = async (
+  timestamp: number,
+  _t: any,
+  options: FetchOptions
+): Promise<FetchResult> => {
+  const data = await fetchStatistics(options.startOfDay);
 
-    let hyperliquidItem = fetchData.find(((item) => item.protocol == "hyperliquid"))
-    if (!hyperliquidItem) {
-        hyperliquidItem = {dailyVolume: 0, totalVolume: 0}
-    }
-    let dailyVolume = Number(hyperliquidItem.dailyVolume)
-    let totalVolume = Number(hyperliquidItem.totalVolume)
-    return {
-        dailyVolume: dailyVolume,
-        totalVolume: totalVolume,
-        timestamp
-    };
+  const { dailyVolume, totalVolume } = data.reduce(
+    (acc, item) => {
+      if (item.protocol == "hyperliquid") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      return acc;
+    },
+    { dailyVolume: 0, totalVolume: 0 }
+  );
+  return {
+    dailyVolume: dailyVolume,
+    totalVolume: totalVolume,
+    timestamp,
+  };
 };
 
+const fetchBsc = async (
+  timestamp: number,
+  _t: any,
+  options: FetchOptions
+): Promise<FetchResult> => {
+  const data = await fetchStatistics(options.startOfDay);
 
-const fetchBsc = async (timestamp: number, _t: any, options: FetchOptions): Promise<FetchResult> => {
-    const fetchData = await fetchURL(`${URL}${endpoint}?ts=${options.startOfDay}`) // returns data for the day before
-    let kiloexItem = fetchData.filter(((item) => item.protocol == "kiloex" && item.network != "base"))
-    if (!kiloexItem) {
-        kiloexItem = [{dailyVolume: 0, totalVolume: 0}]
-    }
-    let dailyVolume = 0
-    let totalVolume = 0
+  const { dailyVolume, totalVolume } = data.reduce(
+    (acc, item) => {
+      if (item.protocol == "kiloex" && item.network != "base") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      return acc;
+    },
+    { dailyVolume: 0, totalVolume: 0 }
+  );
 
-    for (let i in kiloexItem){
-        dailyVolume = Number(dailyVolume) + Number(kiloexItem[i].dailyVolume)
-        totalVolume = Number(totalVolume) + Number(kiloexItem[i].totalVolume)
-    }
-    return {
-        dailyVolume: dailyVolume,
-        totalVolume: totalVolume,
-        timestamp
-    };
+  return {
+    dailyVolume: dailyVolume,
+    totalVolume: totalVolume,
+    timestamp,
+  };
 };
 
-const fetchBase = async (timestamp: number, _t: any, options: FetchOptions): Promise<FetchResult> => {
-    const fetchData = await fetchURL(`${URL}${endpoint}?ts=${options.startOfDay}`) // returns data for the day before
-    let kiloexItem = fetchData.filter(((item) => item.protocol == "kiloex" && item.network == "base"))[0]
-    if (!kiloexItem) {
-        kiloexItem = {dailyVolume: 0, totalVolume: 0}
-    }
-    let dailyVolume = Number(kiloexItem.dailyVolume)
-    let totalVolume = Number(kiloexItem.totalVolume)
-    return {
-        dailyVolume: dailyVolume,
-        totalVolume: totalVolume,
-        timestamp
-    };
+const fetchBase = async (
+  timestamp: number,
+  _t: any,
+  options: FetchOptions
+): Promise<FetchResult> => {
+  const data = await fetchStatistics(options.startOfDay);
+  const { dailyVolume, totalVolume } = data.reduce(
+    (acc, item) => {
+      if (item.protocol == "kiloex" && item.network === "base") {
+        acc.dailyVolume += item.dailyVolume;
+        acc.totalVolume += item.totalVolume;
+      }
+      return acc;
+    },
+    { dailyVolume: 0, totalVolume: 0 }
+  );
+  return {
+    dailyVolume: dailyVolume,
+    totalVolume: totalVolume,
+    timestamp,
+  };
 };
 
 const adapter: SimpleAdapter = {
-    adapter: {
-        [CHAIN.ARBITRUM]: {
-            fetch: fetchArbitrum,
-            start: startTimestampArbitrum
-        },
-        [CHAIN.OPTIMISM]: {
-            fetch: fetchOptimism,
-            start: startTimestampArbitrum
-        },
-        [CHAIN.BSC]: {
-            fetch: fetchBsc,
-            start: startTimestampBsc
-        },
-        [CHAIN.BASE]: {
-            fetch: fetchBase,
-            start: startTimestampBase
-        },
-        [CHAIN.HYPERLIQUID]: {
-            fetch: fetchHyperliquid,
-            start: startTimestampHyperliquid
-        }
+  adapter: {
+    [CHAIN.ARBITRUM]: {
+      fetch: fetchArbitrum,
+      start: startTimestampArbitrum,
     },
-}
-export default adapter
+    [CHAIN.OPTIMISM]: {
+      fetch: fetchOptimism,
+      start: startTimestampArbitrum,
+    },
+    [CHAIN.BSC]: {
+      fetch: fetchBsc,
+      start: startTimestampBsc,
+    },
+    [CHAIN.BASE]: {
+      fetch: fetchBase,
+      start: startTimestampBase,
+    },
+    [CHAIN.HYPERLIQUID]: {
+      fetch: fetchHyperliquid,
+      start: startTimestampHyperliquid,
+    },
+  },
+};
+export default adapter;
